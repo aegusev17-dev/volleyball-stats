@@ -8,7 +8,7 @@
       <div class="set-info">Сет {{ store.currentRally.setNumber }}</div>
       <div class="team-score opponent">
         <span>{{ store.currentRally.score.away }}</span>
-        <strong>Соперник</strong>
+        <strong>{{ store.team.opponentName || 'Соперник' }}</strong>
       </div>
     </div>
 
@@ -19,7 +19,10 @@
           {{ store.team.isServing ? '⚡ Подаем' : '🛡 Принимаем' }}
         </span>
         <button @click="toggleServing" class="toggle-status-btn">⇄</button>
-        <span class="rally-counter">Розыгрыш #{{ rallyCounter + 1 }}</span>
+        <span class="rally-counter">Розыгрыш #{{ currentRallyNumber }}</span>
+        <span v-if="store.team.opponentAces" class="rally-counter">
+          Эйсы соперника: {{ store.team.opponentAces }}
+        </span>
       </div>
     </div>
 
@@ -38,6 +41,11 @@
         </div>
         <div v-if="availableActions.length === 0" class="waiting-message">
           ⏳ Ожидание завершения предыдущего действия...
+        </div>
+        <div v-if="canOpponentAce" class="opponent-ace-row">
+          <button @click="opponentAce" class="opponent-ace-btn">
+            🎯 Эйс соперника ({{ store.team.opponentName || 'Соперник' }})
+          </button>
         </div>
       </div>
 
@@ -199,7 +207,7 @@
 
       <div v-if="store.currentRally.actions.length > 0" class="rally-group current-rally">
         <div class="rally-header current-rally-header">
-          <span class="rally-number">🔄 Текущий розыгрыш</span>
+          <span class="rally-number">🔄 Текущий розыгрыш #{{ currentRallyNumber }}</span>
           <span class="rally-score">Счет: {{ store.currentRally.score.home }} : {{ store.currentRally.score.away }}</span>
         </div>
         <div class="rally-actions">
@@ -281,17 +289,48 @@ const allEventsSorted = computed(() => {
   return [...allEvents.value].sort((a, b) => (b.order || 0) - (a.order || 0))
 })
 
-const allRallies = computed(() => {
-  return store.events
+// Номер розыгрыша = порядок игры внутри сета: самый первый розыгрыш — №1 (он внизу списка),
+// новые идут выше (…, 26, 27). В истории новые события сверху.
+const rallyNumbers = computed(() => {
+  const counters = {}
+  const map = {}
+  store.events
     .filter(e => e.type === 'rally')
-    .sort((a, b) => (b.order || 0) - (a.order || 0))
+    .slice()
+    .sort((a, b) => (a.order || 0) - (b.order || 0))
+    .forEach(r => {
+      counters[r.setNumber] = (counters[r.setNumber] || 0) + 1
+      map[r.id] = counters[r.setNumber]
+    })
+  return map
 })
 
-const rallyCounter = computed(() => allRallies.value.length)
+// Номер текущего (ещё не завершённого) розыгрыша в текущем сете
+const currentRallyNumber = computed(() => {
+  const setNumber = store.currentRally.setNumber
+  return store.events.filter(e => e.type === 'rally' && e.setNumber === setNumber).length + 1
+})
 
 function getRallyIndex(rally) {
-  const index = allRallies.value.findIndex(r => r.id === rally.id)
-  return index !== -1 ? index + 1 : 0
+  return rallyNumbers.value[rally.id] || 0
+}
+
+// === ЭЙС СОПЕРНИКА ===
+// Доступен, когда мы принимаем и в розыгрыше ещё не было действий
+const canOpponentAce = computed(() => {
+  return (
+    store.currentRally.isActive &&
+    !store.team.isServing &&
+    store.currentRally.actions.length === 0
+  )
+})
+
+function opponentAce() {
+  store.addOpponentAce()
+  selectedAction.value = null
+  selectedPlayer.value = null
+  selectedBlockPlayers.value = []
+  selectedBlockType.value = null
 }
 
 // === ФУНКЦИИ ДЛЯ СОБЫТИЙ ===
@@ -299,7 +338,9 @@ function getEventIcon(event) {
   const icons = {
     'libero': '🔄',
     'substitution': '🔄',
-    'timeout': '⏸'
+    'timeout': '⏸',
+    'set_finished': '🏁',
+    'match_finished': '🏆'
   }
   return icons[event.type] || '📌'
 }
@@ -326,6 +367,14 @@ function formatEvent(event) {
     }
     case 'timeout':
       return `⏸ Тайм-аут (${event.teamName})`
+    case 'set_finished': {
+      const winner = event.winner === 'home' ? store.team.name : (store.team.opponentName || 'Соперник')
+      return `Сет ${event.setNumber} завершён. Победил: ${winner}`
+    }
+    case 'match_finished': {
+      const winner = event.winner === 'home' ? store.team.name : (store.team.opponentName || 'Соперник')
+      return `Матч завершён. Победил: ${winner} (по сетам ${event.score.home}:${event.score.away})`
+    }
     default:
       return 'Неизвестное событие'
   }
@@ -594,6 +643,9 @@ function getResultClass(result) {
 }
 
 function getActionItemClass(action) {
+  if (action.result === 'opponent_ace') {
+    return 'point-lost'
+  }
   if (action.result === 'kill' || action.result === 'ace' || action.result === 'block_point' || action.result === 'opponent_error') {
     return 'point-won'
   }
@@ -658,9 +710,7 @@ function completeAction(result) {
 }
 
 function toggleServing() {
-  store.team.isServing = !store.team.isServing
-  store.currentRally.isServing = store.team.isServing
-  store.applyLiberoRules(false)
+  store.toggleServing()
 }
 
 function undoLastAction() {
@@ -692,6 +742,10 @@ function clearHistory() {
 }
 
 function formatAction(action) {
+  if (action.type === 'opponent_serve') {
+    return `${store.team.opponentName || 'Соперник'} — Подача (Эйс)`
+  }
+
   const player = store.team.players.find(p => p.id === action.playerId)
 
   let extraInfo = ''
@@ -1335,5 +1389,27 @@ h4 {
   .block-player-btn {
     width: 100%;
   }
+}
+
+.opponent-ace-row {
+  margin-top: 12px;
+}
+
+.opponent-ace-btn {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #e53935;
+  border-radius: 8px;
+  background: #fdecea;
+  color: #c62828;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.opponent-ace-btn:hover {
+  background: #e53935;
+  color: white;
 }
 </style>

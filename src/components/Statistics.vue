@@ -7,6 +7,9 @@
     </div>
 
     <div v-else>
+      <button class="export-pdf-btn" @click="exportTableToPDF">
+      📄 Экспорт таблицы в PDF
+      </button>
       <div class="stats-table-wrapper">
         <table class="stats-table">
           <thead>
@@ -523,6 +526,9 @@ watch(() => store.team.setServing, () => {
 onMounted(() => {
   renderCharts()
 })
+function exportTableToPDF() {
+  window.print()
+}
 </script>
 
 <style scoped>
@@ -917,6 +923,78 @@ onMounted(() => {
   .player-zone {
     min-width: 34px;
     width: 34px;
+  }
+}
+
+.export-pdf-btn {
+  margin-bottom: 16px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #198754;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media print {
+  @page {
+    size: A3 landscape;
+    margin: 8mm;
+  }
+
+  /* По умолчанию скрываем всё содержимое страницы */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Оставляем видимой только таблицу */
+  .stats-table-wrapper,
+  .stats-table-wrapper * {
+    visibility: visible !important;
+  }
+
+  .stats-table-wrapper {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .stats-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    border-collapse: collapse !important;
+    table-layout: auto !important;
+    font-size: 8pt !important;
+  }
+
+  .stats-table th,
+  .stats-table td {
+    padding: 4px 3px !important;
+    border: 1px solid #777 !important;
+    color: #000 !important;
+    background: #fff !important;
+    font-size: 8pt !important;
+    overflow-wrap: anywhere;
+  }
+
+  .stats-table thead {
+    display: table-header-group;
+  }
+
+  .stats-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .export-pdf-btn {
+    display: none !important;
   }
 }
 </style>

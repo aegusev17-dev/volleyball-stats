@@ -2,6 +2,16 @@
   <div class="match-controls">
     <h3>🎯 Управление матчем</h3>
 
+    <div class="opponent-config">
+      <label for="opponent-name">Соперник:</label>
+      <input
+        id="opponent-name"
+        v-model="opponentName"
+        placeholder="Название команды соперника"
+        maxlength="60"
+      />
+    </div>
+
     <div v-if="!isMatchStarted" class="start-match">
       <h4>Настройка перед матчем</h4>
       <p>Выберите статус для расстановки:</p>
@@ -44,7 +54,7 @@
       <div class="set-info">
         <span>Сет: {{ currentSetNumber }}</span>
         <span class="score">
-          {{ teamName }} {{ homeScore }} : {{ awayScore }} Соперник
+          {{ teamName }} {{ homeScore }} : {{ awayScore }} {{ opponentName || 'Соперник' }}
         </span>
         <span class="status-indicator" :class="isServing ? 'serving' : 'receiving'">
           {{ isServing ? '⚡ Подаем' : '🛡 Принимаем' }}
@@ -76,9 +86,18 @@
         <div v-if="currentSetNumber === 5 && isFifthSet" class="toss-section">
           <span class="toss-label">🏆 Жребий 5-го сета:</span>
           <button @click="setFifthSetServe(true)" class="toss-btn serve-btn">Мы подаем</button>
-          <button @click="setFifthSetServe(false)" class="toss-btn receive-btn">Соперник подает</button>
+          <button @click="setFifthSetServe(false)" class="toss-btn receive-btn">{{ opponentName || 'Соперник' }} подает</button>
         </div>
         <button @click="resetMatch" class="reset-btn">🔄 Сбросить матч</button>
+      </div>
+
+      <div class="save-row">
+        <button @click="downloadMatch" class="save-btn">💾 Скачать матч (.json)</button>
+        <label class="save-btn">
+          📂 Загрузить матч
+          <input type="file" accept="application/json,.json" @change="uploadMatch" hidden />
+        </label>
+        <span class="save-hint">Матч автоматически сохраняется в браузере</span>
       </div>
 
       <div class="libero-info">
@@ -133,6 +152,13 @@ const awayScore = computed(() => {
 
 const isServing = computed(() => {
   return store.team?.isServing || false
+})
+
+const opponentName = computed({
+  get: () => store.team?.opponentName ?? '',
+  set: value => {
+    store.team.opponentName = value
+  }
 })
 
 const teamName = computed(() => {
@@ -234,6 +260,31 @@ function setFifthSetServe(isOurServe) {
   store.applyLiberoRules()
 }
 
+// === Резервная копия матча файлом ===
+function downloadMatch() {
+  const blob = new Blob([store.exportMatch()], { type: 'application/json' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = `match-${new Date().toISOString().slice(0, 10)}.json`
+  link.click()
+  URL.revokeObjectURL(link.href)
+}
+
+function uploadMatch(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    if (store.importMatch(String(reader.result))) {
+      store.saveMatch()
+    } else {
+      alert('Не удалось загрузить матч: файл повреждён или имеет другой формат')
+    }
+  }
+  reader.readAsText(file)
+  event.target.value = ''
+}
+
 function resetMatch() {
   if (confirm('Вы уверены, что хотите сбросить матч?')) {
     store.resetMatch()
@@ -255,6 +306,60 @@ function resetMatch() {
 .match-controls h3 {
   margin-bottom: 20px;
   color: #333;
+}
+
+.opponent-config {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.opponent-config label {
+  font-weight: 600;
+  color: #555;
+  white-space: nowrap;
+}
+
+.opponent-config input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  font-size: 16px;
+}
+
+.opponent-config input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.save-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.save-btn {
+  padding: 8px 14px;
+  border: 2px solid #667eea;
+  border-radius: 6px;
+  background: white;
+  color: #667eea;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.save-btn:hover {
+  background: #667eea;
+  color: white;
+}
+
+.save-hint {
+  font-size: 12px;
+  color: #999;
 }
 
 .start-match {

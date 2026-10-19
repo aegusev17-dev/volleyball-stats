@@ -14,6 +14,16 @@
         />
       </h3>
 
+      <div class="opponent-row">
+        <span class="opponent-label">Соперник:</span>
+        <input
+          v-model="store.team.opponentName"
+          class="opponent-name-input"
+          placeholder="Название команды соперника"
+          maxlength="60"
+        />
+      </div>
+
       <div class="input-group">
         <input v-model="newPlayerName" placeholder="Имя игрока" />
         <input v-model.number="newPlayerNumber" type="number" placeholder="Номер" />
@@ -221,6 +231,33 @@ function removePlayer(id) {
   width: 100%;
   background: transparent;
   transition: border-color 0.3s;
+}
+
+.opponent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 0;
+}
+
+.opponent-label {
+  color: #666;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.opponent-name-input {
+  flex: 1;
+  font-size: 18px;
+  border: none;
+  border-bottom: 2px solid #e53935;
+  padding: 4px 10px;
+  background: transparent;
+}
+
+.opponent-name-input:focus {
+  outline: none;
+  border-bottom-color: #b71c1c;
 }
 
 .team-name-input:focus {

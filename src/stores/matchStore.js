@@ -1,25 +1,42 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
-export const useMatchStore = defineStore('match', () => {
-  // === Состояние ===
-  const team = ref({
+const MATCH_KEY = 'volleyball-match-v1'
+
+// Уникальный числовой id. Date.now() + Math.random() давал одинаковые id
+// у игроков, созданных в одну миллисекунду (не хватает точности float).
+let idSeq = 0
+function newId() {
+  idSeq = (idSeq + 1) % 1000
+  return Date.now() * 1000 + idSeq
+}
+
+function createDefaultTeam() {
+  return {
     name: 'Моя команда',
+    opponentName: 'Соперник',
     players: [],
     lineup: [],
     currentRotation: [],
     libero: null,
+    liberoReplacedId: null, // кого именно заменил либеро на площадке
     isLiberoOnCourt: false,
     isServing: false,
     timeouts: 0,
     substitutions: 0,
+    opponentAces: 0,
     currentSet: 1,
     rotationStep: 0,
     isMatchActive: false,
     isOurServe: true,
     startingPositions: {},
     setServing: {}
-  })
+  }
+}
+
+export const useMatchStore = defineStore('match', () => {
+  // === Состояние ===
+  const team = ref(createDefaultTeam())
 
   const events = ref([])
   const currentRally = ref({
@@ -44,7 +61,7 @@ export const useMatchStore = defineStore('match', () => {
   // === ДОБАВЛЕНИЕ ИГРОКА ===
   function addPlayer(name, number, position = '', altPosition = '') {
     team.value.players.push({
-      id: Date.now() + Math.random(),
+      id: newId(),
       name,
       number,
       position,
@@ -96,8 +113,13 @@ export const useMatchStore = defineStore('match', () => {
     const playerOut = team.value.players.find(p => p.id === playerOutId)
 
     if (playerIn && playerOut) {
-      const idx = team.value.currentRotation.indexOf(playerOut)
+      const idx = team.value.currentRotation.findIndex(p => p && p.id === playerOut.id)
       if (idx !== -1) {
+        // Если заменили самого либеро — он больше не на площадке
+        if (team.value.libero && playerOut.id === team.value.libero.id) {
+          team.value.isLiberoOnCourt = false
+          team.value.liberoReplacedId = null
+        }
         team.value.currentRotation[idx] = playerIn
         team.value.substitutions++
         playerIn.stats.substitutions.in++
@@ -108,39 +130,50 @@ export const useMatchStore = defineStore('match', () => {
     }
   }
 
-  // === ЛИБЕРО ВХОДИТ ===
+  // === ЛИБЕРО ВХОДИТ (вручную) ===
   function liberoIn(playerOutId) {
     if (!team.value.isMatchActive) return
     if (!team.value.libero) return
+    if (isLiberoInRotation()) return
 
-    const playerOut = team.value.players.find(p => p.id === playerOutId)
-    if (!playerOut) return
+    const rotation = team.value.currentRotation
+    const idx = rotation.findIndex(p => p && p.id === playerOutId)
+    if (idx === -1) return
 
-    const idx = team.value.currentRotation.indexOf(playerOut)
-    if (idx !== -1) {
-      team.value.currentRotation[idx] = team.value.libero
-      team.value.isLiberoOnCourt = true
-      addLiberoEvent('in', playerOut, false)
-      applyLiberoRules(false, false)
+    const zone = idx + 1
+    if ([2, 3, 4].includes(zone)) {
+      console.warn('⚠️ Либеро нельзя выпускать на игрока передней линии')
+      return
     }
+    if (zone === 1 && team.value.isServing) {
+      console.warn('⚠️ Либеро не может подавать')
+      return
+    }
+
+    const playerOut = rotation[idx]
+    rotation[idx] = team.value.libero
+    team.value.liberoReplacedId = playerOut.id
+    team.value.isLiberoOnCourt = true
+    team.value.currentRotation = [...rotation]
+    addLiberoEvent('in', playerOut, false)
   }
 
-  // === ЛИБЕРО ВЫХОДИТ ===
+  // === ЛИБЕРО ВЫХОДИТ (вручную) ===
   function liberoOut() {
     if (!team.value.isMatchActive) return
-    if (!team.value.libero || !team.value.isLiberoOnCourt) return
+    if (!team.value.libero) return
 
-    const idx = team.value.currentRotation.indexOf(team.value.libero)
-    if (idx !== -1) {
-      const available = team.value.players.find(p =>
-        !team.value.currentRotation.includes(p) &&
-        p.id !== team.value.libero?.id
-      )
-      if (available) {
-        team.value.currentRotation[idx] = available
-        team.value.isLiberoOnCourt = false
-        addLiberoEvent('out', available, false)
-      }
+    const rotation = [...team.value.currentRotation]
+    const idx = rotation.findIndex(p => p && p.id === team.value.libero.id)
+    if (idx === -1) {
+      team.value.isLiberoOnCourt = false
+      return
+    }
+
+    const returned = takeLiberoOff(rotation, idx)
+    if (returned) {
+      team.value.currentRotation = rotation
+      addLiberoEvent('out', returned, false)
     }
   }
 
@@ -160,7 +193,7 @@ export const useMatchStore = defineStore('match', () => {
     const orderValue = isPreRally ? eventOrder - 0.5 : eventOrder
 
     const event = {
-      id: Date.now() + Math.random(),
+      id: newId(),
       order: orderValue,
       type: 'libero',
       direction: direction,
@@ -178,7 +211,7 @@ export const useMatchStore = defineStore('match', () => {
   function addSubstitutionEvent(playerIn, playerOut) {
     eventOrder++
     events.value.push({
-      id: Date.now() + Math.random(),
+      id: newId(),
       order: eventOrder,
       type: 'substitution',
       playerIn: { ...playerIn },
@@ -193,7 +226,7 @@ export const useMatchStore = defineStore('match', () => {
   function addTimeoutEvent() {
     eventOrder++
     events.value.push({
-      id: Date.now() + Math.random(),
+      id: newId(),
       order: eventOrder,
       type: 'timeout',
       teamName: team.value.name,
@@ -204,7 +237,7 @@ export const useMatchStore = defineStore('match', () => {
   }
 
   // === РОТАЦИЯ ===
-  function rotateTeam() {
+  function rotateTeam(applyLibero = true) {
     if (!team.value.isMatchActive) return
     if (team.value.currentRotation.length === 0) return
 
@@ -221,14 +254,31 @@ export const useMatchStore = defineStore('match', () => {
     team.value.currentRotation = newRotation
     team.value.rotationStep = (team.value.rotationStep + 1) % 6
 
-    applyLiberoRules(true, false)
+    if (applyLibero) applyLiberoRules(true, false)
   }
 
+  // Либеро сейчас в ротации? (источник истины — сама ротация, а не флаг)
+  function isLiberoInRotation() {
+    const lib = team.value.libero
+    if (!lib) return false
+    return team.value.currentRotation.some(p => p && p.id === lib.id)
+  }
+
+  // Кого вернуть вместо либеро: ровно того, кого он заменил.
+  // Запасной вариант — центральный, которого нет на площадке.
   function findReplacedMB() {
     const rotation = team.value.currentRotation
+    const onCourt = id => rotation.some(p => p && p.id === id)
+
+    const savedId = team.value.liberoReplacedId
+    if (savedId != null && !onCourt(savedId)) {
+      const saved = team.value.players.find(p => p.id === savedId)
+      if (saved) return saved
+    }
+
     for (const player of team.value.players) {
       if (player.position === 'MB' &&
-          !rotation.includes(player) &&
+          !onCourt(player.id) &&
           player.id !== team.value.libero?.id) {
         return player
       }
@@ -236,107 +286,79 @@ export const useMatchStore = defineStore('match', () => {
     return null
   }
 
+  // Убирает либеро с позиции idx в переданном массиве rotation (меняет его на месте)
+  function takeLiberoOff(rotation, idx) {
+    const back = findReplacedMB()
+    if (!back) return null
+    rotation[idx] = back
+    team.value.isLiberoOnCourt = false
+    team.value.liberoReplacedId = null
+    return back
+  }
+
   function replaceLiberoWithMBInternal() {
-    if (!team.value.libero || !team.value.isLiberoOnCourt) return
-
-    const rotation = team.value.currentRotation
-    const idx = rotation.indexOf(team.value.libero)
-
-    if (idx !== -1) {
-      const mbPlayer = findReplacedMB()
-      if (mbPlayer) {
-        rotation[idx] = mbPlayer
-        team.value.isLiberoOnCourt = false
-        team.value.currentRotation = [...rotation]
-        return mbPlayer
-      }
+    if (!team.value.libero) return null
+    const rotation = [...team.value.currentRotation]
+    const idx = rotation.findIndex(p => p && p.id === team.value.libero.id)
+    if (idx === -1) {
+      team.value.isLiberoOnCourt = false
+      return null
     }
-    return null
+    const mb = takeLiberoOff(rotation, idx)
+    if (mb) team.value.currentRotation = rotation
+    return mb
   }
 
   // === ПРИМЕНЕНИЕ ПРАВИЛ ЛИБЕРО ===
+  // 1) Либеро обязан уйти, если оказался у сетки (зоны 2-4)
+  //    или на подаче (зона 1 при нашей подаче).
+  // 2) Либеро заходит вместо центрального, который стоит в задней линии
+  //    (зоны 5, 6, а при приёме — и зона 1). Подающий центральный остаётся.
   function applyLiberoRules(recordEvent = false, isPreRally = false) {
     if (!team.value.isMatchActive) return
-    if (!team.value.libero) return
+    const libero = team.value.libero
+    if (!libero) return
 
-    const rotation = team.value.currentRotation
+    const rotation = [...team.value.currentRotation]
     if (rotation.length === 0) return
 
-    const backRowZones = [1, 5, 6]
+    let idx = rotation.findIndex(p => p && p.id === libero.id)
+    team.value.isLiberoOnCourt = idx !== -1 // синхронизируем флаг с реальностью
 
-    if (team.value.isLiberoOnCourt) {
-      const idx = rotation.indexOf(team.value.libero)
-      if (idx !== -1) {
-        const zone = idx + 1
-        if ([2, 3, 4].includes(zone)) {
-          const mbPlayer = replaceLiberoWithMBInternal()
-          if (mbPlayer && recordEvent) {
-            addLiberoEvent('out', mbPlayer, isPreRally)
-          }
-          return
+    // 1. Либеро должен выйти
+    if (idx !== -1) {
+      const zone = idx + 1
+      const mustLeave = [2, 3, 4].includes(zone) || (team.value.isServing && zone === 1)
+      if (mustLeave) {
+        const returned = takeLiberoOff(rotation, idx)
+        if (returned) {
+          if (recordEvent) addLiberoEvent('out', returned, isPreRally)
+          idx = -1
         }
       }
     }
 
-    if (!team.value.isServing) {
-      let mbIndex = -1
-      rotation.forEach((player, index) => {
-        const zone = index + 1
-        if (player && player.position === 'MB' && backRowZones.includes(zone)) {
-          mbIndex = index
-        }
+    // 2. Либеро должен войти
+    if (idx === -1) {
+      const backRowZones = [1, 5, 6]
+      const mbIndex = rotation.findIndex((player, i) => {
+        if (!player || player.position !== 'MB') return false
+        const zone = i + 1
+        if (!backRowZones.includes(zone)) return false
+        if (zone === 1 && team.value.isServing) return false // подающий остаётся
+        return true
       })
 
-      if (mbIndex !== -1 && !team.value.isLiberoOnCourt) {
-        const replacedPlayer = rotation[mbIndex]
-        rotation[mbIndex] = team.value.libero
+      if (mbIndex !== -1) {
+        const replaced = rotation[mbIndex]
+        rotation[mbIndex] = libero
         team.value.isLiberoOnCourt = true
-        if (recordEvent) {
-          addLiberoEvent('in', replacedPlayer, isPreRally)
-        }
+        team.value.liberoReplacedId = replaced.id
+        if (recordEvent) addLiberoEvent('in', replaced, isPreRally)
       }
     }
 
-    if (team.value.isServing) {
-      const playerInZone1 = rotation[0]
-
-      if (playerInZone1 && playerInZone1.id === team.value.libero?.id) {
-        const mbPlayer = replaceLiberoWithMBInternal()
-        if (mbPlayer && recordEvent) {
-          addLiberoEvent('out', mbPlayer, isPreRally)
-        }
-        return
-      }
-
-      if (playerInZone1 && playerInZone1.position === 'MB') {
-        if (team.value.isLiberoOnCourt) {
-          const mbPlayer = replaceLiberoWithMBInternal()
-          if (mbPlayer && recordEvent) {
-            addLiberoEvent('out', mbPlayer, isPreRally)
-          }
-        }
-        return
-      }
-
-      let mbIndex = -1
-      rotation.forEach((player, index) => {
-        const zone = index + 1
-        if (player && player.position === 'MB' && backRowZones.includes(zone)) {
-          mbIndex = index
-        }
-      })
-
-      if (mbIndex !== -1 && !team.value.isLiberoOnCourt) {
-        const replacedPlayer = rotation[mbIndex]
-        rotation[mbIndex] = team.value.libero
-        team.value.isLiberoOnCourt = true
-        if (recordEvent) {
-          addLiberoEvent('in', replacedPlayer, isPreRally)
-        }
-      }
-    }
-
-    team.value.currentRotation = [...rotation]
+    team.value.currentRotation = rotation
   }
 
   // === УСТАНОВИТЬ СТАТУС ПОДАЧИ ===
@@ -345,37 +367,45 @@ export const useMatchStore = defineStore('match', () => {
     currentRally.value.isServing = isServing
 
     if (!team.value.isMatchActive) {
-      const rotation = team.value.currentRotation
-      if (rotation.length > 0 && team.value.libero) {
-        const backRowZones = [1, 5, 6]
-        if (!isServing) {
-          let mbIndex = -1
-          rotation.forEach((player, index) => {
-            const zone = index + 1
-            if (player && player.position === 'MB' && backRowZones.includes(zone)) {
-              mbIndex = index
-            }
-          })
-          if (mbIndex !== -1 && !team.value.isLiberoOnCourt) {
-            rotation[mbIndex] = team.value.libero
+      // До начала сета: расстановка меняется молча, без событий
+      const rotation = [...team.value.currentRotation]
+      const libero = team.value.libero
+      if (rotation.length > 0 && libero) {
+        const idx = rotation.findIndex(p => p && p.id === libero.id)
+        if (isServing && idx !== -1) {
+          const back = findReplacedMB()
+          if (back) {
+            rotation[idx] = back
+            team.value.isLiberoOnCourt = false
+            team.value.liberoReplacedId = null
+          }
+        } else if (!isServing && idx === -1) {
+          const mbIndex = rotation.findIndex(
+            (p, i) => p && p.position === 'MB' && [1, 5, 6].includes(i + 1)
+          )
+          if (mbIndex !== -1) {
+            team.value.liberoReplacedId = rotation[mbIndex].id
+            rotation[mbIndex] = libero
             team.value.isLiberoOnCourt = true
           }
-        } else {
-          if (team.value.isLiberoOnCourt) {
-            const idx = rotation.indexOf(team.value.libero)
-            if (idx !== -1) {
-              const mbPlayer = findReplacedMB()
-              if (mbPlayer) {
-                rotation[idx] = mbPlayer
-                team.value.isLiberoOnCourt = false
-              }
-            }
-          }
         }
-        team.value.currentRotation = [...rotation]
+        team.value.currentRotation = rotation
       }
       return
     }
+
+    // Матч идёт (ручная коррекция статуса): применяем правила и пишем событие
+    applyLiberoRules(true, false)
+  }
+
+  // Переключить подачу/приём во время матча
+  function toggleServing() {
+    setServing(!team.value.isServing)
+  }
+
+  // === НАЗВАНИЕ СОПЕРНИКА ===
+  function setOpponentName(name) {
+    team.value.opponentName = (name || '').trim() || 'Соперник'
   }
 
   // === НАЧАТЬ СЕТ ===
@@ -392,6 +422,7 @@ export const useMatchStore = defineStore('match', () => {
     team.value.currentRotation = [...team.value.lineup]
     team.value.rotationStep = 0
     team.value.isLiberoOnCourt = false
+    team.value.liberoReplacedId = null
     rallyCounter = 0
 
     const setPositions = {}
@@ -421,7 +452,7 @@ export const useMatchStore = defineStore('match', () => {
 
   function keepMB() {
     if (!team.value.isMatchActive) return
-    if (team.value.isLiberoOnCourt) {
+    if (isLiberoInRotation()) {
       const mbPlayer = replaceLiberoWithMBInternal()
       if (mbPlayer) {
         addLiberoEvent('out', mbPlayer, false)
@@ -433,6 +464,7 @@ export const useMatchStore = defineStore('match', () => {
     team.value.currentSet = newSet
     team.value.rotationStep = 0
     team.value.isLiberoOnCourt = false
+    team.value.liberoReplacedId = null
     team.value.currentRotation = [...team.value.lineup]
 
     if (newSet <= 4) {
@@ -509,6 +541,27 @@ export const useMatchStore = defineStore('match', () => {
     }
   }
 
+  // === ЭЙС СОПЕРНИКА (подача соперника — очко им, без участия наших игроков) ===
+  function addOpponentAce() {
+    if (!team.value.isMatchActive) return
+    if (team.value.isServing) return // эйс соперника возможен только когда мы принимаем
+    if (currentRally.value.actions.length > 0) return // это первое действие розыгрыша
+
+    team.value.opponentAces = (team.value.opponentAces || 0) + 1
+
+    const action = {
+      type: 'opponent_serve',
+      playerId: null,
+      targetId: null,
+      result: 'opponent_ace',
+      timestamp: Date.now(),
+      setNumber: currentRally.value.setNumber,
+      meta: { originalResult: 'Эйс' }
+    }
+    currentRally.value.actions.push(action)
+    endRally(action)
+  }
+
   function updatePlayerStats(player, actionType, result) {
     const stats = player.stats
 
@@ -577,30 +630,24 @@ export const useMatchStore = defineStore('match', () => {
     }
 
     // Обновляем счет
+    let needRotate = false
     if (isPointWon) {
       rally.score.home += 1
-      if (team.value.isServing) {
-        // Выиграли на своей подаче — ротации НЕТ
-      } else {
-        rotateTeam()
-        team.value.isServing = true
-        currentRally.value.isServing = true
-      }
+      // Выиграли на приёме — переходим на подачу с ротацией.
+      // Выиграли на своей подаче — ротации нет.
+      needRotate = !team.value.isServing
     } else {
       rally.score.away += 1
-      if (team.value.isServing) {
-        team.value.isServing = false
-        currentRally.value.isServing = false
-      }
     }
 
-    // Сохраняем розыгрыш в историю
+    // Сохраняем розыгрыш в историю СРАЗУ, до ротации и замен либеро:
+    // тогда события либеро (которые вызваны этим розыгрышем) идут ПОСЛЕ него
     rallyCounter++
     const currentRallyNumber = rallyCounter
 
     eventOrder++
     events.value.push({
-      id: Date.now() + Math.random(),
+      id: newId(),
       order: eventOrder,
       type: 'rally',
       rallyNumber: currentRallyNumber,
@@ -609,6 +656,19 @@ export const useMatchStore = defineStore('match', () => {
       actions: [...rally.actions],
       isPointWon: isPointWon
     })
+
+    // Меняем подачу и ротируем ДО применения правил либеро,
+    // чтобы правила считались уже для новой ситуации (подаем / принимаем)
+    if (isPointWon) {
+      if (needRotate) {
+        team.value.isServing = true
+        currentRally.value.isServing = true
+        rotateTeam(false)
+      }
+    } else if (team.value.isServing) {
+      team.value.isServing = false
+      currentRally.value.isServing = false
+    }
 
     // === ПРОВЕРКА ЗАВЕРШЕНИЯ ПАРТИИ ===
     const isSetFinished = checkSetFinished(rally.score.home, rally.score.away, rally.setNumber)
@@ -624,7 +684,7 @@ export const useMatchStore = defineStore('match', () => {
       // Добавляем событие о завершении партии
       eventOrder++
       events.value.push({
-        id: Date.now() + Math.random(),
+        id: newId(),
         order: eventOrder,
         type: 'set_finished',
         setNumber: rally.setNumber,
@@ -649,7 +709,7 @@ export const useMatchStore = defineStore('match', () => {
       if (isMatchFinished) {
         // Матч завершен
         events.value.push({
-          id: Date.now() + Math.random(),
+          id: newId(),
           order: eventOrder + 1,
           type: 'match_finished',
           score: { home: setsWon.home, away: setsWon.away },
@@ -799,8 +859,10 @@ export const useMatchStore = defineStore('match', () => {
     team.value.players.forEach(p => resetPlayerStats(p))
     team.value.timeouts = 0
     team.value.substitutions = 0
+    team.value.opponentAces = 0
     team.value.isServing = false
     team.value.isLiberoOnCourt = false
+    team.value.liberoReplacedId = null
     team.value.rotationStep = 0
     team.value.isMatchActive = false
     team.value.isOurServe = true
@@ -809,6 +871,7 @@ export const useMatchStore = defineStore('match', () => {
     team.value.setServing = {}
     eventOrder = 0
     rallyCounter = 0
+    clearSavedMatch()
   }
 
   function resetPlayerStats(player) {
@@ -821,6 +884,101 @@ export const useMatchStore = defineStore('match', () => {
       substitutions: { in: 0, out: 0 }
     }
   }
+
+  // === СОХРАНЕНИЕ МАТЧА ===
+  // Игроки в хранилище сравниваются по ссылке, поэтому в JSON кладём только id,
+  // а при загрузке собираем ссылки на объекты из team.players.
+  function serializeMatch() {
+    const t = team.value
+    const ids = arr => arr.map(p => (p ? p.id : null))
+    return {
+      version: 1,
+      savedAt: Date.now(),
+      eventOrder,
+      rallyCounter,
+      events: events.value,
+      currentRally: currentRally.value,
+      team: {
+        ...t,
+        lineup: ids(t.lineup),
+        currentRotation: ids(t.currentRotation),
+        libero: t.libero ? t.libero.id : null
+      }
+    }
+  }
+
+  function saveMatch() {
+    try {
+      localStorage.setItem(MATCH_KEY, JSON.stringify(serializeMatch()))
+    } catch (e) {
+      console.warn('Не удалось сохранить матч:', e)
+    }
+  }
+
+  function restoreMatch(data) {
+    if (!data || data.version !== 1 || !data.team) return false
+
+    const players = data.team.players || []
+    const byId = new Map(players.map(p => [p.id, p]))
+    const pick = id => (id == null ? null : byId.get(id) ?? null)
+
+    team.value = {
+      ...createDefaultTeam(),
+      ...data.team,
+      lineup: (data.team.lineup || []).map(pick).filter(Boolean),
+      currentRotation: (data.team.currentRotation || []).map(pick),
+      libero: pick(data.team.libero)
+    }
+    events.value = data.events || []
+    if (data.currentRally) currentRally.value = data.currentRally
+    eventOrder = data.eventOrder || 0
+    rallyCounter = data.rallyCounter || 0
+    return true
+  }
+
+  function loadSavedMatch() {
+    try {
+      const raw = localStorage.getItem(MATCH_KEY)
+      return raw ? restoreMatch(JSON.parse(raw)) : false
+    } catch (e) {
+      console.warn('Сохранённый матч повреждён:', e)
+      return false
+    }
+  }
+
+  function clearSavedMatch() {
+    try {
+      localStorage.removeItem(MATCH_KEY)
+    } catch (e) {
+      console.warn(e)
+    }
+  }
+
+  // Резервная копия файлом
+  function exportMatch() {
+    return JSON.stringify(serializeMatch(), null, 2)
+  }
+
+  function importMatch(json) {
+    try {
+      return restoreMatch(JSON.parse(json))
+    } catch {
+      return false
+    }
+  }
+
+  // Загружаем при старте и сохраняем автоматически (с задержкой 300 мс)
+  loadSavedMatch()
+
+  let saveTimer = null
+  watch(
+    [team, events, currentRally],
+    () => {
+      clearTimeout(saveTimer)
+      saveTimer = setTimeout(saveMatch, 300)
+    },
+    { deep: true }
+  )
 
   return {
     team,
@@ -850,6 +1008,13 @@ export const useMatchStore = defineStore('match', () => {
     addTimeoutEvent,
     getPlayerStats,
     getTeamStats,
-    rallyCounter
+    toggleServing,
+    setOpponentName,
+    addOpponentAce,
+    saveMatch,
+    loadSavedMatch,
+    clearSavedMatch,
+    exportMatch,
+    importMatch
   }
 })
