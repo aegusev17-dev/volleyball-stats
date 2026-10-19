@@ -714,14 +714,32 @@ function toggleServing() {
 }
 
 function undoLastAction() {
+  // Если розыгрыш ещё не завершён — сохраняем прежнее поведение
   if (store.currentRally.actions.length > 0) {
     store.currentRally.actions.pop()
     selectedAction.value = null
     selectedPlayer.value = null
     selectedBlockPlayers.value = []
     selectedBlockType.value = null
+    return
   }
+
+  // Если розыгрыш завершён — отменяем его целиком
+  const undone = store.undoLastRally()
+
+  if (!undone) {
+    alert(
+      'Не удалось отменить розыгрыш. Возможно, для него нет сохранённого состояния.'
+    )
+    return
+  }
+
+  selectedAction.value = null
+  selectedPlayer.value = null
+  selectedBlockPlayers.value = []
+  selectedBlockType.value = null
 }
+
 
 function resetRally() {
   if (confirm('Сбросить все действия текущего розыгрыша?')) {

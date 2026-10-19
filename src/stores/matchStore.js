@@ -58,6 +58,119 @@ export const useMatchStore = defineStore('match', () => {
   let eventOrder = 0
   let rallyCounter = 0
 
+
+let pendingRallySnapshot = null
+
+// Снимок состояния до первого действия розыгрыша
+function captureRallySnapshot() {
+  return {
+    eventsLength: events.value.length,
+    eventOrder,
+    rallyCounter,
+
+    currentRally: {
+      score: { ...currentRally.value.score },
+      setNumber: currentRally.value.setNumber,
+      isActive: currentRally.value.isActive,
+      isServing: currentRally.value.isServing
+    },
+
+    team: {
+      isServing: team.value.isServing,
+      isOurServe: team.value.isOurServe,
+      rotationStep: team.value.rotationStep,
+      isMatchActive: team.value.isMatchActive,
+      isLiberoOnCourt: team.value.isLiberoOnCourt,
+      liberoReplacedId: team.value.liberoReplacedId,
+      timeouts: team.value.timeouts,
+      substitutions: team.value.substitutions,
+      opponentAces: team.value.opponentAces,
+      currentSet: team.value.currentSet,
+      startingPositions: JSON.parse(JSON.stringify(team.value.startingPositions || {})),
+      setServing: JSON.parse(JSON.stringify(team.value.setServing || {})),
+      lineupIds: team.value.lineup.map(p => p?.id ?? null),
+      rotationIds: team.value.currentRotation.map(p => p?.id ?? null)
+    },
+
+    playerStats: team.value.players.map(player => ({
+      id: player.id,
+      stats: JSON.parse(JSON.stringify(player.stats))
+    }))
+  }
+}
+
+// Восстановление состояния до розыгрыша
+function undoLastRally() {
+  const lastRallyIndex = events.value.findLastIndex(
+    event => event.type === 'rally'
+  )
+
+  if (lastRallyIndex === -1) return false
+
+  const lastRally = events.value[lastRallyIndex]
+  const snapshot = lastRally.undoSnapshot
+
+  // Старые записи не содержат снимка состояния
+  if (!snapshot) {
+    console.warn(
+      'Нельзя безопасно отменить этот розыгрыш: отсутствует снимок состояния.'
+    )
+    return false
+  }
+
+  // Удаляем розыгрыш и все события, появившиеся после начала розыгрыша
+  events.value.splice(snapshot.eventsLength)
+
+  // Восстанавливаем статистику игроков
+  snapshot.playerStats.forEach(savedPlayer => {
+    const player = team.value.players.find(p => p.id === savedPlayer.id)
+    if (player) {
+      player.stats = JSON.parse(JSON.stringify(savedPlayer.stats))
+    }
+  })
+
+  // Восстанавливаем состояние команды
+  Object.assign(team.value, {
+    isServing: snapshot.team.isServing,
+    isOurServe: snapshot.team.isOurServe,
+    rotationStep: snapshot.team.rotationStep,
+    isMatchActive: snapshot.team.isMatchActive,
+    isLiberoOnCourt: snapshot.team.isLiberoOnCourt,
+    liberoReplacedId: snapshot.team.liberoReplacedId,
+    timeouts: snapshot.team.timeouts,
+    substitutions: snapshot.team.substitutions,
+    opponentAces: snapshot.team.opponentAces,
+    currentSet: snapshot.team.currentSet,
+    startingPositions: JSON.parse(
+      JSON.stringify(snapshot.team.startingPositions)
+    ),
+    setServing: JSON.parse(
+      JSON.stringify(snapshot.team.setServing)
+    ),
+    lineup: snapshot.team.lineupIds.map(
+      id => team.value.players.find(p => p.id === id) || null
+    ),
+    currentRotation: snapshot.team.rotationIds.map(
+      id => team.value.players.find(p => p.id === id) || null
+    )
+  })
+
+  // Возвращаемся к счёту до отменённого розыгрыша
+  currentRally.value = {
+    ...snapshot.currentRally,
+    score: { ...snapshot.currentRally.score },
+    actions: []
+  }
+
+  eventOrder = snapshot.eventOrder
+  rallyCounter = snapshot.rallyCounter
+  pendingRallySnapshot = null
+
+  saveMatch()
+  return true
+}
+
+
   // === ДОБАВЛЕНИЕ ИГРОКА ===
   function addPlayer(name, number, position = '', altPosition = '') {
     team.value.players.push({
@@ -522,6 +635,13 @@ export const useMatchStore = defineStore('match', () => {
       return
     }
 
+    if (
+    currentRally.value.actions.length === 0 &&
+    !pendingRallySnapshot
+    ) {
+    pendingRallySnapshot = captureRallySnapshot()
+    }
+
     updatePlayerStats(player, actionType, result)
 
     const action = {
@@ -546,7 +666,9 @@ export const useMatchStore = defineStore('match', () => {
     if (!team.value.isMatchActive) return
     if (team.value.isServing) return // эйс соперника возможен только когда мы принимаем
     if (currentRally.value.actions.length > 0) return // это первое действие розыгрыша
-
+    if (!pendingRallySnapshot) {
+    pendingRallySnapshot = captureRallySnapshot()
+    }
     team.value.opponentAces = (team.value.opponentAces || 0) + 1
 
     const action = {
@@ -647,14 +769,15 @@ export const useMatchStore = defineStore('match', () => {
 
     eventOrder++
     events.value.push({
-      id: newId(),
-      order: eventOrder,
-      type: 'rally',
-      rallyNumber: currentRallyNumber,
-      setNumber: rally.setNumber,
-      score: { home: rally.score.home, away: rally.score.away },
-      actions: [...rally.actions],
-      isPointWon: isPointWon
+    id: newId(),
+    order: eventOrder,
+    type: 'rally',
+    rallyNumber: currentRallyNumber,
+    setNumber: rally.setNumber,
+    score: { home: rally.score.home, away: rally.score.away },
+    actions: [...rally.actions],
+    isPointWon: isPointWon,
+    undoSnapshot: pendingRallySnapshot
     })
 
     // Меняем подачу и ротируем ДО применения правил либеро,
@@ -719,6 +842,7 @@ export const useMatchStore = defineStore('match', () => {
         // Матч полностью остановлен
         team.value.isMatchActive = false
         currentRally.value.isActive = false
+        pendingRallySnapshot = null
         return
       }
 
@@ -760,6 +884,7 @@ export const useMatchStore = defineStore('match', () => {
         isActive: true,
         isServing: team.value.isServing
       }
+      pendingRallySnapshot = null
     }
   }
 
@@ -997,6 +1122,7 @@ export const useMatchStore = defineStore('match', () => {
     changeSet,
     setFifthSetServe,
     addAction,
+    undoLastRally,
     resetMatch,
     getRotation,
     setServing,

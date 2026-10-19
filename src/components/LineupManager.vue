@@ -431,7 +431,31 @@ function addPlayerToTeam() {
   }
 }
 
-function updateLineup() {}
+function updateLineup() {
+  const playerIds = selectedPlayers.value
+
+  if (playerIds.length !== 6 || playerIds.some(id => id == null)) {
+    return
+  }
+
+  if (new Set(playerIds).size !== 6) {
+    return
+  }
+
+  const lineup = playerIds.map(id =>
+    store.team.players.find(player => player.id === id)
+  )
+
+  if (lineup.some(player => !player)) {
+    return
+  }
+
+  store.team.lineup = [...lineup]
+
+  if (!store.team.isMatchActive) {
+    store.team.currentRotation = [...lineup]
+  }
+}
 
 function applyLineup() {
   const playerIds = selectedPlayers.value.filter(id => id !== null)
