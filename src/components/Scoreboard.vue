@@ -38,18 +38,40 @@
           >
             {{ getActionLabel(action) }}
           </button>
+
+          <!-- Наша подача: Эйс одним нажатием (подаёт игрок из зоны 1) -->
+          <button v-if="canOurAce" @click="ourAce" class="ace-action-btn ours">
+            🏐 Эйс
+          </button>
+
+          <!-- Наш приём: никто не принял — эйс соперника -->
+          <button v-if="canOpponentAce" @click="opponentAce" class="ace-action-btn theirs">
+            🎯 Эйс соперника
+          </button>
         </div>
         <div v-if="availableActions.length === 0" class="waiting-message">
-          ⏳ Ожидание завершения предыдущего действия...
-        </div>
-        <div v-if="canOpponentAce" class="opponent-ace-row">
-          <button @click="opponentAce" class="opponent-ace-btn">
-            🎯 Эйс соперника ({{ store.team.opponentName || 'Соперник' }})
-          </button>
+          <template v-if="store.events.some(e => e.type === 'match_finished')">
+            🏆 Матч завершён.
+          </template>
+          <template v-else-if="!store.currentRally.isActive">
+            🏁 Сет завершён. Откройте вкладку «Матч» и нажмите «Начать {{ store.currentRally.setNumber }}-й сет».
+          </template>
+          <template v-else>⏳ Ожидание завершения предыдущего действия...</template>
         </div>
       </div>
 
-      <div class="players-group" v-if="selectedAction">
+      <!-- Подача: подающий определяется автоматически (игрок в зоне 1 на момент подачи) -->
+      <div class="serving-player" v-if="selectedAction === 'serve'">
+        <template v-if="servingPlayer">
+          🏐 Подаёт:
+          <strong>#{{ servingPlayer.number }} {{ servingPlayer.name }}</strong>
+          <span class="position-tag" :class="getPositionClass(servingPlayer)">{{ getPositionLabel(servingPlayer) }}</span>
+          <span class="zone-tag">зона 1</span>
+        </template>
+        <template v-else>⚠️ В зоне 1 нет игрока — проверьте состав</template>
+      </div>
+
+      <div class="players-group" v-if="selectedAction && selectedAction !== 'serve'">
         <h4>2. {{ isBlockAction ? 'Выберите вариант блока' : 'Игрок' }}</h4>
 
         <div v-if="isBlockAction" class="block-options">
@@ -177,8 +199,8 @@
         </div>
       </div>
 
-      <div class="results-group" v-if="selectedPlayer && selectedAction && !isBlockAction">
-        <h4>3. Результат</h4>
+      <div class="results-group" v-if="activePlayer && selectedAction && !isBlockAction">
+        <h4>{{ selectedAction === 'serve' ? '2' : '3' }}. Результат</h4>
         <div class="btn-group">
           <button
             v-for="result in getResultsForAction(selectedAction)"
@@ -313,6 +335,36 @@ const currentRallyNumber = computed(() => {
 
 function getRallyIndex(rally) {
   return rallyNumbers.value[rally.id] || 0
+}
+
+// === ПОДАЮЩИЙ ===
+// Берётся из зоны 1 в момент нажатия, поэтому замена перед подачей учитывается сама
+const servingPlayer = computed(() => store.team.currentRotation?.[0] || null)
+
+// Игрок, к которому относится выбранное действие
+const activePlayer = computed(() => {
+  return selectedAction.value === 'serve' ? servingPlayer.value : selectedPlayer.value
+})
+
+// === ЭЙС НА НАШЕЙ ПОДАЧЕ ===
+// Доступен, когда мы подаём и в розыгрыше ещё не было действий
+const canOurAce = computed(() => {
+  return (
+    store.currentRally.isActive &&
+    store.team.isServing &&
+    store.currentRally.actions.length === 0 &&
+    !!servingPlayer.value
+  )
+})
+
+function ourAce() {
+  const server = servingPlayer.value
+  if (!server) return
+  store.addAction('serve', server.id, 'ace', null, { originalResult: 'Эйс' })
+  selectedAction.value = null
+  selectedPlayer.value = null
+  selectedBlockPlayers.value = []
+  selectedBlockType.value = null
 }
 
 // === ЭЙС СОПЕРНИКА ===
@@ -691,7 +743,10 @@ function completeAction(result) {
   const actionType = actionMap[selectedAction.value]
   const resultCode = resultMap[result]
 
-  store.addAction(actionType, selectedPlayer.value.id, resultCode, null, {
+  const player = activePlayer.value
+  if (!player) return
+
+  store.addAction(actionType, player.id, resultCode, null, {
     originalResult: result
   })
 
@@ -1409,25 +1464,44 @@ h4 {
   }
 }
 
-.opponent-ace-row {
-  margin-top: 12px;
+.btn-group button.ace-action-btn {
+  font-weight: 600;
 }
 
-.opponent-ace-btn {
-  width: 100%;
-  padding: 12px 16px;
-  border: 2px solid #e53935;
-  border-radius: 8px;
+.btn-group button.ace-action-btn.ours {
+  border-color: #2e7d32;
+  background: #e8f5e9;
+  color: #1b5e20;
+}
+
+.btn-group button.ace-action-btn.ours:hover {
+  background: #2e7d32;
+  color: white;
+  border-color: #2e7d32;
+}
+
+.btn-group button.ace-action-btn.theirs {
+  border-color: #e53935;
   background: #fdecea;
   color: #c62828;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
 }
 
-.opponent-ace-btn:hover {
+.btn-group button.ace-action-btn.theirs:hover {
   background: #e53935;
   color: white;
+  border-color: #e53935;
+}
+
+.serving-player {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #eef2ff;
+  border: 2px solid #667eea;
+  font-size: 15px;
 }
 </style>

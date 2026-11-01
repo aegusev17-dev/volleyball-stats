@@ -13,7 +13,16 @@
     </div>
 
     <div v-if="!isMatchStarted" class="start-match">
-      <h4>Настройка перед матчем</h4>
+      <div v-if="isMatchFinished" class="match-finished">
+        <h4>🏆 Матч завершён</h4>
+        <p>Результат по сетам: {{ setsScore.home }} : {{ setsScore.away }}</p>
+        <button @click="resetMatch" class="reset-btn">🔄 Новый матч</button>
+      </div>
+
+      <template v-else>
+      <h4>
+        {{ currentSetNumber > 1 ? `Подготовка к ${currentSetNumber}-му сету` : 'Настройка перед матчем' }}
+      </h4>
       <p>Выберите статус для расстановки:</p>
       <div class="choice-buttons">
         <button
@@ -38,8 +47,8 @@
       </div>
 
       <div class="start-section">
-        <p>Начните 1-й сет:</p>
-        <button @click="startFirstSet" class="start-btn">🚀 Начать 1-й сет</button>
+        <p>Начните {{ currentSetNumber }}-й сет:</p>
+        <button @click="startFirstSet" class="start-btn">🚀 Начать {{ currentSetNumber }}-й сет</button>
       </div>
 
       <div v-if="!hasPlayers" class="warning">
@@ -48,6 +57,7 @@
       <div v-if="hasPlayers && !hasLibero" class="warning">
         ⚠️ Назначьте либеро!
       </div>
+      </template>
     </div>
 
     <div v-else class="match-info">
@@ -133,6 +143,19 @@ import { useMatchStore } from '@/stores/matchStore'
 
 const store = useMatchStore()
 const showSetDialog = ref(false)
+
+// Матч завершён, когда одна из команд выиграла 3 сета
+const setsScore = computed(() => {
+  const score = { home: 0, away: 0 }
+  store.events.forEach(e => {
+    if (e.type === 'set_finished') score[e.winner]++
+  })
+  return score
+})
+
+const isMatchFinished = computed(() => {
+  return store.events.some(e => e.type === 'match_finished')
+})
 
 const isMatchStarted = computed(() => {
   return store.currentRally?.isActive || false
@@ -228,8 +251,9 @@ function startFirstSet() {
   }
 
   // === ВАЖНО: передаем ТЕКУЩИЙ статус подачи ===
+  // После окончания сета currentRally.setNumber уже указывает на следующий сет
   const currentStatus = store.team.isServing
-  store.startSet(1, currentStatus)
+  store.startSet(currentSetNumber.value, currentStatus)
 }
 
 function showNextSetDialog() {
@@ -364,6 +388,14 @@ function resetMatch() {
 
 .start-match {
   text-align: center;
+}
+
+.match-finished {
+  padding: 16px 0;
+}
+
+.match-finished h4 {
+  font-size: 20px;
 }
 
 .start-match h4 {

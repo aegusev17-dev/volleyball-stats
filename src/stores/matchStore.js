@@ -861,6 +861,9 @@ function undoLastRally() {
       }
       team.value.setServing[nextSet] = isOurServe
 
+      // Снимок для отката относится к завершённой партии — в новой партии он не нужен
+      pendingRallySnapshot = null
+
       // Сбрасываем состояние для новой партии
       currentRally.value = {
         actions: [],
@@ -1144,3 +1147,4 @@ function undoLastRally() {
     importMatch
   }
 })
+
