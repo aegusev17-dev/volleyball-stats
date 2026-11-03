@@ -26,6 +26,21 @@
       </div>
     </div>
 
+    <div class="timeout-bar">
+      <button
+        @click="callTimeout('home')"
+        :disabled="!store.currentRally.isActive || store.timeoutsUsed('home') >= store.TIMEOUTS_PER_SET"
+      >
+        ⏸ Наш тайм-аут ({{ store.timeoutsUsed('home') }}/{{ store.TIMEOUTS_PER_SET }})
+      </button>
+      <button
+        @click="callTimeout('away')"
+        :disabled="!store.currentRally.isActive || store.timeoutsUsed('away') >= store.TIMEOUTS_PER_SET"
+      >
+        ⏸ Тайм-аут соперника ({{ store.timeoutsUsed('away') }}/{{ store.TIMEOUTS_PER_SET }})
+      </button>
+    </div>
+
     <div class="actions-panel" v-if="allPlayers.length > 0">
       <div class="action-group">
         <h4>1. Действие</h4>
@@ -335,6 +350,11 @@ const currentRallyNumber = computed(() => {
 
 function getRallyIndex(rally) {
   return rallyNumbers.value[rally.id] || 0
+}
+
+// === ТАЙМ-АУТЫ (по 2 на сет у каждой команды) ===
+function callTimeout(side) {
+  store.callTimeout(side)
 }
 
 // === ПОДАЮЩИЙ ===
@@ -1462,6 +1482,35 @@ h4 {
   .block-player-btn {
     width: 100%;
   }
+}
+
+.timeout-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+
+.timeout-bar button {
+  flex: 1;
+  min-width: 180px;
+  padding: 8px 12px;
+  border: 2px solid #ffb74d;
+  border-radius: 8px;
+  background: #fff8e1;
+  color: #8d5a00;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.timeout-bar button:hover:not(:disabled) {
+  background: #ffb74d;
+  color: white;
+}
+
+.timeout-bar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-group button.ace-action-btn {

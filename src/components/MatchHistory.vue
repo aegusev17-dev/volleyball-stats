@@ -1,11 +1,10 @@
-
 <template>
   <section class="match-history">
     <h2>📚 История матчей</h2>
 
     <p v-if="matches.length === 0" class="empty">
       Сохранённых матчей пока нет.
-      Перейдите во вкладку «Матч» и сохраните первую игру.
+      Откройте вкладку «Матч» и нажмите «Сохранить в историю».
     </p>
 
     <div v-else class="match-list">
@@ -25,6 +24,13 @@
           <p>
             Команда:
             {{ match.teamData?.name || 'Моя команда' }}
+            <template v-if="match.teamData?.opponentName">
+              — {{ match.teamData.opponentName }}
+            </template>
+          </p>
+
+          <p v-if="match.sets">
+            Счёт по сетам: {{ match.sets.home }} : {{ match.sets.away }}
           </p>
 
           <p>
@@ -33,7 +39,7 @@
           </p>
 
           <p v-if="match.currentRally">
-            Счёт текущего сета:
+            Счёт сета {{ match.currentRally.setNumber || '' }}:
             {{ match.currentRally.score.home }}
             :
             {{ match.currentRally.score.away }}

@@ -101,15 +101,6 @@
         <button @click="resetMatch" class="reset-btn">🔄 Сбросить матч</button>
       </div>
 
-      <div class="save-row">
-        <button @click="downloadMatch" class="save-btn">💾 Скачать матч (.json)</button>
-        <label class="save-btn">
-          📂 Загрузить матч
-          <input type="file" accept="application/json,.json" @change="uploadMatch" hidden />
-        </label>
-        <span class="save-hint">Матч автоматически сохраняется в браузере</span>
-      </div>
-
       <div class="libero-info">
         <span v-if="libero">
           Либеро: #{{ libero.number }} {{ libero.name }}
@@ -118,6 +109,16 @@
         </span>
         <span v-else class="no-libero">Либеро не назначен</span>
       </div>
+    </div>
+
+    <div class="save-row">
+      <button @click="saveToHistory" class="save-btn primary">📚 Сохранить в историю</button>
+      <button @click="downloadMatch" class="save-btn">💾 Скачать матч (.json)</button>
+      <label class="save-btn">
+        📂 Загрузить матч
+        <input type="file" accept="application/json,.json" @change="uploadMatch" hidden />
+      </label>
+      <span class="save-hint">Текущий матч автоматически сохраняется в браузере</span>
     </div>
 
     <div v-if="showSetDialog" class="modal-overlay">
@@ -140,6 +141,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useMatchStore } from '@/stores/matchStore'
+import { saveMatch as saveMatchRecord, getMatchById } from '@/utils/matchStorage'
 
 const store = useMatchStore()
 const showSetDialog = ref(false)
@@ -284,6 +286,48 @@ function setFifthSetServe(isOurServe) {
   store.applyLiberoRules()
 }
 
+// === Сохранение в «Историю матчей» ===
+function saveToHistory() {
+  let existing = null
+  try {
+    const activeId = sessionStorage.getItem('activeSavedMatchId')
+    existing = activeId ? getMatchById(activeId) : null
+  } catch {
+    existing = null
+  }
+
+  let id
+  let name
+  if (
+    existing &&
+    confirm(`Перезаписать сохранение «${existing.name}»?\nОК — перезаписать, Отмена — сохранить как новое`)
+  ) {
+    id = existing.id
+    name = existing.name
+  } else {
+    const suggested =
+      `${store.team.name} — ${store.team.opponentName || 'Соперник'}, ` +
+      new Date().toLocaleDateString('ru-RU')
+    const typed = prompt('Название сохранения:', suggested)
+    if (typed === null) return
+    name = typed.trim() || suggested
+  }
+
+  try {
+    const record = store.createMatchRecord(name, id)
+    saveMatchRecord(record)
+    try {
+      sessionStorage.setItem('activeSavedMatchId', record.id)
+    } catch {
+      // sessionStorage недоступен — не страшно
+    }
+    alert('Матч сохранён во вкладке «История матчей»')
+  } catch (error) {
+    console.error(error)
+    alert('Не удалось сохранить матч: ' + error.message)
+  }
+}
+
 // === Резервная копия матча файлом ===
 function downloadMatch() {
   const blob = new Blob([store.exportMatch()], { type: 'application/json' })
@@ -374,6 +418,11 @@ function resetMatch() {
   color: #667eea;
   font-size: 14px;
   cursor: pointer;
+}
+
+.save-btn.primary {
+  background: #667eea;
+  color: white;
 }
 
 .save-btn:hover {

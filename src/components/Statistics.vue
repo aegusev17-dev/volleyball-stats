@@ -19,7 +19,8 @@
               <th colspan="5">Стартовая позиция</th>
               <th rowspan="2">Очки ±</th>
               <th colspan="3">Подача</th>
-              <th colspan="3">Прием</th>
+              <th colspan="3">Прием (с подачи)</th>
+              <th colspan="3">Защита (после атаки)</th>
               <th colspan="5">Атака</th>
               <th rowspan="2">Блок</th>
             </tr>
@@ -47,6 +48,9 @@
               <th>Всего</th>
               <th>Ошиб</th>
               <th>Эйс</th>
+              <th>Всего</th>
+              <th>Ошиб</th>
+              <th>%+</th>
               <th>Всего</th>
               <th>Ошиб</th>
               <th>%+</th>
@@ -87,6 +91,9 @@
               <td class="stat-reception">{{ getPlayerReceptionTotal(player) }}</td>
               <td class="stat-reception-error">{{ getPlayerReceptionErrors(player) }}</td>
               <td class="stat-reception-percent">{{ getPlayerReceptionPercent(player) }}%</td>
+              <td class="stat-reception">{{ getPlayerDefenseTotal(player) }}</td>
+              <td class="stat-reception-error">{{ getPlayerDefenseErrors(player) }}</td>
+              <td class="stat-reception-percent">{{ getPlayerDefensePercent(player) }}%</td>
               <td class="stat-attack">{{ getPlayerAttackTotal(player) }}</td>
               <td class="stat-attack-error">{{ getPlayerAttackErrors(player) }}</td>
               <td class="stat-attack-block">{{ getPlayerAttackBlocks(player) }}</td>
@@ -111,6 +118,9 @@
               <td class="stat-reception"><strong>{{ teamStats.receptions.total }}</strong></td>
               <td class="stat-reception-error"><strong>{{ teamStats.receptions.errors }}</strong></td>
               <td class="stat-reception-percent"><strong>{{ teamStats.receptionPercent }}%</strong></td>
+              <td class="stat-reception"><strong>{{ teamStats.defense.total }}</strong></td>
+              <td class="stat-reception-error"><strong>{{ teamStats.defense.errors }}</strong></td>
+              <td class="stat-reception-percent"><strong>{{ teamStats.defensePercent }}%</strong></td>
               <td class="stat-attack"><strong>{{ teamStats.attacks.total }}</strong></td>
               <td class="stat-attack-error"><strong>{{ teamStats.attacks.errors }}</strong></td>
               <td class="stat-attack-block"><strong>{{ getTotalAttackBlocks() }}</strong></td>
@@ -121,37 +131,15 @@
           </tfoot>
         </table>
       </div>
-
-      <!-- Графики -->
-      <div class="charts">
-        <h3>📈 Эффективность атаки</h3>
-        <div class="chart-container">
-          <canvas id="attackChart"></canvas>
-        </div>
-
-        <h3>📊 Распределение очков по игрокам</h3>
-        <div class="chart-container">
-          <canvas id="pointsChart"></canvas>
-        </div>
-
-        <h3>📊 Эффективность приема</h3>
-        <div class="chart-container">
-          <canvas id="receptionChart"></canvas>
-        </div>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { computed } from 'vue'
 import { useMatchStore } from '@/stores/matchStore'
-import Chart from 'chart.js/auto'
 
 const store = useMatchStore()
-const attackChart = ref(null)
-const pointsChart = ref(null)
-const receptionChart = ref(null)
 
 // === ВСЕ ИГРОКИ ===
 const allPlayers = computed(() => {
@@ -231,11 +219,13 @@ function getPlayerStats(player) {
   const serves = s.serves || { total: 0, aces: 0, errors: 0 }
   const blocks = s.blocks || { total: 0, points: 0, errors: 0 }
   const receptions = s.receptions || { total: 0, perfect: 0, positive: 0, errors: 0 }
+  const defense = s.defense || { total: 0, good: 0, errors: 0 }
 
   return {
     points: (attacks.kills || 0) + (serves.aces || 0) + (blocks.points || 0),
     serves: serves,
     receptions: receptions,
+    defense: defense,
     attacks: attacks,
     blocks: blocks
   }
@@ -274,6 +264,20 @@ function getPlayerReceptionPercent(player) {
   const r = getPlayerStats(player).receptions
   if (r.total === 0) return 0
   return Math.round(((r.perfect + r.positive) / r.total) * 100)
+}
+
+function getPlayerDefenseTotal(player) {
+  return getPlayerStats(player).defense.total || 0
+}
+
+function getPlayerDefenseErrors(player) {
+  return getPlayerStats(player).defense.errors || 0
+}
+
+function getPlayerDefensePercent(player) {
+  const d = getPlayerStats(player).defense
+  if (!d.total) return 0
+  return Math.round(((d.good || 0) / d.total) * 100)
 }
 
 function getPlayerAttackTotal(player) {
@@ -316,6 +320,7 @@ const teamStats = computed(() => {
     serves: { total: 0, aces: 0, errors: 0 },
     receptions: { total: 0, perfect: 0, positive: 0, errors: 0 },
     attacks: { total: 0, kills: 0, errors: 0, digs: 0 },
+    defense: { total: 0, good: 0, errors: 0 },
     blocks: { total: 0, points: 0, errors: 0 }
   }
 
@@ -333,6 +338,9 @@ const teamStats = computed(() => {
     total.attacks.kills += stats.attacks.kills
     total.attacks.errors += stats.attacks.errors
     total.attacks.digs += stats.attacks.digs
+    total.defense.total += stats.defense.total || 0
+    total.defense.good += stats.defense.good || 0
+    total.defense.errors += stats.defense.errors || 0
     total.blocks.total += stats.blocks.total
     total.blocks.points += stats.blocks.points
     total.blocks.errors += stats.blocks.errors
@@ -340,6 +348,9 @@ const teamStats = computed(() => {
 
   const receptionPercent = total.receptions.total > 0
     ? Math.round(((total.receptions.perfect + total.receptions.positive) / total.receptions.total) * 100)
+    : 0
+  const defensePercent = total.defense.total > 0
+    ? Math.round((total.defense.good / total.defense.total) * 100)
     : 0
   const attackEfficiency = total.attacks.total > 0
     ? Math.round((total.attacks.kills / total.attacks.total) * 100)
@@ -349,6 +360,7 @@ const teamStats = computed(() => {
   return {
     ...total,
     receptionPercent,
+    defensePercent,
     attackEfficiency,
     pointsDiff
   }
@@ -358,174 +370,6 @@ function getTotalAttackBlocks() {
   return teamStats.value.attacks.digs || 0
 }
 
-// === ГРАФИКИ ===
-function renderCharts() {
-  nextTick(() => {
-    renderAttackChart()
-    renderPointsChart()
-    renderReceptionChart()
-  })
-}
-
-function renderAttackChart() {
-  if (attackChart.value) {
-    attackChart.value.destroy()
-  }
-
-  const players = allPlayers.value.filter(p => {
-    const a = getPlayerStats(p).attacks
-    return a.total > 0
-  })
-
-  const labels = players.map(p => `#${p.number} ${p.name}`)
-  const data = players.map(p => getPlayerAttackEfficiency(p))
-  const colors = data.map(v => {
-    if (v >= 50) return '#4caf50'
-    if (v >= 30) return '#ff9800'
-    return '#f44336'
-  })
-
-  const ctx = document.getElementById('attackChart')
-  if (!ctx) return
-
-  attackChart.value = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: labels.length ? labels : ['Нет данных'],
-      datasets: [{
-        label: 'Эффективность атаки (%)',
-        data: data.length ? data : [0],
-        backgroundColor: colors.length ? colors : ['#999'],
-        borderColor: colors.length ? colors : ['#999'],
-        borderWidth: 1
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          max: 100,
-          title: { display: true, text: '%' }
-        }
-      }
-    }
-  })
-}
-
-function renderPointsChart() {
-  if (pointsChart.value) {
-    pointsChart.value.destroy()
-  }
-
-  const players = allPlayers.value.filter(p => getPlayerPoints(p) > 0)
-  const labels = players.map(p => `#${p.number} ${p.name}`)
-  const data = players.map(p => getPlayerPoints(p))
-  const colors = ['#667eea', '#764ba2', '#4caf50', '#ff9800', '#f44336', '#2196f3', '#9c27b0']
-
-  const ctx = document.getElementById('pointsChart')
-  if (!ctx) return
-
-  pointsChart.value = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: labels.length ? labels : ['Нет очков'],
-      datasets: [{
-        data: data.length ? data : [1],
-        backgroundColor: colors.slice(0, data.length || 1),
-        borderColor: '#1a1a2e',
-        borderWidth: 2
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            color: '#333'
-          }
-        }
-      }
-    }
-  })
-}
-
-function renderReceptionChart() {
-  if (receptionChart.value) {
-    receptionChart.value.destroy()
-  }
-
-  const players = allPlayers.value.filter(p => {
-    const r = getPlayerStats(p).receptions
-    return r.total > 0
-  })
-
-  const labels = players.map(p => `#${p.number} ${p.name}`)
-  const data = players.map(p => getPlayerReceptionPercent(p))
-  const colors = data.map(v => {
-    if (v >= 70) return '#4caf50'
-    if (v >= 50) return '#8bc34a'
-    if (v >= 30) return '#ff9800'
-    return '#f44336'
-  })
-
-  const ctx = document.getElementById('receptionChart')
-  if (!ctx) return
-
-  receptionChart.value = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: labels.length ? labels : ['Нет данных'],
-      datasets: [{
-        label: 'Процент положительного приема (%)',
-        data: data.length ? data : [0],
-        backgroundColor: colors.length ? colors : ['#999'],
-        borderColor: colors.length ? colors : ['#999'],
-        borderWidth: 1
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          max: 100,
-          title: { display: true, text: '%' }
-        }
-      }
-    }
-  })
-}
-
-watch(() => store.events, () => {
-  renderCharts()
-}, { deep: true })
-
-watch(() => store.currentRally, () => {
-  renderCharts()
-}, { deep: true })
-
-watch(() => store.team.currentSet, () => {
-  renderCharts()
-})
-
-watch(() => store.team.setServing, () => {
-  renderCharts()
-}, { deep: true })
-
-onMounted(() => {
-  renderCharts()
-})
 function exportTableToPDF() {
   window.print()
 }
@@ -552,7 +396,8 @@ function exportTableToPDF() {
   background: white;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  overflow: hidden;
+  overflow-x: auto; /* таблица шире экрана — прокрутка вбок */
+  -webkit-overflow-scrolling: touch;
   margin-bottom: 20px;
 }
 
@@ -560,7 +405,7 @@ function exportTableToPDF() {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
-  min-width: 1100px;
+  min-width: 1300px;
 }
 
 /* === ВСЯ ШАПКА — белая с черным шрифтом === */
@@ -853,28 +698,6 @@ function exportTableToPDF() {
   color: #667eea;
 }
 
-/* === ГРАФИКИ === */
-.charts {
-  background: white;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-.charts h3 {
-  margin: 20px 0 15px 0;
-  color: #333;
-}
-
-.charts h3:first-of-type {
-  margin-top: 0;
-}
-
-.chart-container {
-  height: 280px;
-  margin-bottom: 30px;
-}
-
 /* === АДАПТИВ === */
 @media (max-width: 768px) {
   .stats-table {
@@ -899,10 +722,6 @@ function exportTableToPDF() {
 
   .zone-cell {
     font-size: 11px;
-  }
-
-  .chart-container {
-    height: 200px;
   }
 
   .set-header {

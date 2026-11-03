@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
 const MATCH_KEY = 'volleyball-match-v1'
+const TIMEOUTS_PER_SET = 2
 
 // Уникальный числовой id. Date.now() + Math.random() давал одинаковые id
 // у игроков, созданных в одну миллисекунду (не хватает точности float).
@@ -166,6 +167,9 @@ function undoLastRally() {
   rallyCounter = snapshot.rallyCounter
   pendingRallySnapshot = null
 
+  // Снимок старого формата не знает про «защиту» — пересчитываем по истории
+  if (snapshot.playerStats.some(item => !item.stats.defense)) rebuildPlayerStats()
+
   saveMatch()
   return true
 }
@@ -186,6 +190,7 @@ function undoLastRally() {
         serves: { total: 0, aces: 0, errors: 0 },
         blocks: { total: 0, points: 0, errors: 0 },
         receptions: { total: 0, positive: 0, perfect: 0, errors: 0 },
+        defense: { total: 0, good: 0, errors: 0 },
         sets: { total: 0, assists: 0 },
         substitutions: { in: 0, out: 0 }
       }
@@ -295,10 +300,21 @@ function undoLastRally() {
   }
 
   // === ТАЙМ-АУТ ===
-  function callTimeout() {
-    if (!team.value.isMatchActive) return
-    team.value.timeouts++
-    addTimeoutEvent()
+  // Сколько тайм-аутов команда уже взяла в сете (side: 'home' — мы, 'away' — соперник)
+  function timeoutsUsed(side = 'home', setNumber = currentRally.value.setNumber) {
+    return events.value.filter(e =>
+      e.type === 'timeout' &&
+      e.setNumber === setNumber &&
+      (e.side || 'home') === side
+    ).length
+  }
+
+  function callTimeout(side = 'home') {
+    if (!team.value.isMatchActive) return false
+    if (timeoutsUsed(side) >= TIMEOUTS_PER_SET) return false
+    if (side === 'home') team.value.timeouts++
+    addTimeoutEvent(side)
+    return true
   }
 
   // === СОБЫТИЕ: ЗАМЕНА ЛИБЕРО ===
@@ -340,13 +356,14 @@ function undoLastRally() {
   }
 
   // === СОБЫТИЕ: ТАЙМ-АУТ ===
-  function addTimeoutEvent() {
+  function addTimeoutEvent(side = 'home') {
     eventOrder++
     events.value.push({
       id: newId(),
       order: eventOrder,
       type: 'timeout',
-      teamName: team.value.name,
+      side,
+      teamName: side === 'home' ? team.value.name : (team.value.opponentName || 'Соперник'),
       timestamp: Date.now(),
       setNumber: currentRally.value.setNumber,
       score: { home: currentRally.value.score.home, away: currentRally.value.score.away }
@@ -701,6 +718,8 @@ function undoLastRally() {
         stats.attacks.total++
         if (result === 'kill') stats.attacks.kills++
         if (result === 'error') stats.attacks.errors++
+        // Нашу атаку заблокировали — колонка «Блок» в разделе «Атака»
+        if (result === 'block') stats.attacks.digs++
         break
       case 'block':
         stats.blocks.total++
@@ -708,20 +727,19 @@ function undoLastRally() {
         if (result === 'error') stats.blocks.errors++
         break
       case 'reception':
+        // «Ошибка соперника» на подаче — это не приём, в статистику не идёт
+        if (result === 'opponent_error') break
         stats.receptions.total++
         if (result === 'perfect' || result === 'good_dig') stats.receptions.perfect++
         if (result === 'positive') stats.receptions.positive++
         if (result === 'error') stats.receptions.errors++
         break
       case 'dig':
-        stats.receptions.total++
-        if (result === 'good_dig') {
-          stats.receptions.perfect++
-        } else if (result === 'error') {
-          stats.receptions.errors++
-        } else if (result === 'continue') {
-          stats.receptions.positive++
-        }
+        // Защита после атаки соперника — отдельно от приёма подачи
+        if (!stats.defense) stats.defense = { total: 0, good: 0, errors: 0 }
+        stats.defense.total++
+        if (result === 'good_dig' || result === 'continue') stats.defense.good++
+        if (result === 'error') stats.defense.errors++
         break
       case 'set':
         stats.sets.total++
@@ -901,6 +919,7 @@ function undoLastRally() {
     const serves = s.serves || { total: 0, aces: 0, errors: 0 }
     const blocks = s.blocks || { total: 0, points: 0, errors: 0 }
     const receptions = s.receptions || { total: 0, perfect: 0, positive: 0, errors: 0 }
+    const defense = s.defense || { total: 0, good: 0, errors: 0 }
 
     const points = (attacks.kills || 0) + (serves.aces || 0) + (blocks.points || 0)
     const receptionEfficiency = (receptions.perfect || 0) + (receptions.positive || 0) - (receptions.errors || 0)
@@ -927,6 +946,10 @@ function undoLastRally() {
         efficiency: attackEfficiency,
         errorPercent: attackErrorPercent
       },
+      defense: {
+        ...defense,
+        percent: defense.total > 0 ? Math.round((defense.good / defense.total) * 100) : 0
+      },
       blocks: { ...blocks }
     }
   }
@@ -938,6 +961,7 @@ function undoLastRally() {
       serves: { total: 0, aces: 0, errors: 0 },
       receptions: { total: 0, perfect: 0, positive: 0, errors: 0 },
       attacks: { total: 0, kills: 0, errors: 0 },
+      defense: { total: 0, good: 0, errors: 0 },
       blocks: { total: 0, points: 0, errors: 0 }
     }
 
@@ -954,6 +978,9 @@ function undoLastRally() {
       total.attacks.total += stats.attacks.total
       total.attacks.kills += stats.attacks.kills
       total.attacks.errors += stats.attacks.errors
+      total.defense.total += stats.defense.total
+      total.defense.good += stats.defense.good
+      total.defense.errors += stats.defense.errors
       total.blocks.total += stats.blocks.total
       total.blocks.points += stats.blocks.points
       total.blocks.errors += stats.blocks.errors
@@ -970,8 +997,13 @@ function undoLastRally() {
       ? Math.round((total.attacks.errors / total.attacks.total) * 100)
       : 0
 
+    const defensePercent = total.defense.total > 0
+      ? Math.round((total.defense.good / total.defense.total) * 100)
+      : 0
+
     return {
       ...total,
+      defensePercent,
       receptionEfficiency,
       receptionPercent,
       attackEfficiency,
@@ -1012,6 +1044,7 @@ function undoLastRally() {
       serves: { total: 0, aces: 0, errors: 0 },
       blocks: { total: 0, points: 0, errors: 0 },
       receptions: { total: 0, positive: 0, perfect: 0, errors: 0 },
+      defense: { total: 0, good: 0, errors: 0 },
       sets: { total: 0, assists: 0 },
       substitutions: { in: 0, out: 0 }
     }
@@ -1020,15 +1053,26 @@ function undoLastRally() {
   // === СОХРАНЕНИЕ МАТЧА ===
   // Игроки в хранилище сравниваются по ссылке, поэтому в JSON кладём только id,
   // а при загрузке собираем ссылки на объекты из team.players.
-  function serializeMatch() {
+  // Снимки для отката тяжёлые (≈10 КБ на розыгрыш), поэтому в сохранение
+  // кладём их только для последних keepUndo розыгрышей
+  function slimEvents(keepUndo = 5) {
+    const rallyIdx = []
+    events.value.forEach((e, i) => { if (e.type === 'rally') rallyIdx.push(i) })
+    const keep = new Set(keepUndo > 0 ? rallyIdx.slice(-keepUndo) : [])
+    return events.value.map((e, i) =>
+      e.type === 'rally' && e.undoSnapshot && !keep.has(i) ? { ...e, undoSnapshot: null } : e
+    )
+  }
+
+  function serializeMatch(keepUndo = 5) {
     const t = team.value
     const ids = arr => arr.map(p => (p ? p.id : null))
     return {
-      version: 1,
+      version: 2,
       savedAt: Date.now(),
       eventOrder,
       rallyCounter,
-      events: events.value,
+      events: slimEvents(keepUndo),
       currentRally: currentRally.value,
       team: {
         ...t,
@@ -1048,7 +1092,7 @@ function undoLastRally() {
   }
 
   function restoreMatch(data) {
-    if (!data || data.version !== 1 || !data.team) return false
+    if (!data || ![1, 2].includes(data.version) || !data.team) return false
 
     const players = data.team.players || []
     const byId = new Map(players.map(p => [p.id, p]))
@@ -1067,6 +1111,55 @@ function undoLastRally() {
     if (!team.value.isMatchActive) currentRally.value.isActive = false
     eventOrder = data.eventOrder || 0
     rallyCounter = data.rallyCounter || 0
+    // Сохранения старого формата: пересчитываем статистику (приём/защита разделены)
+    if (data.version === 1) rebuildPlayerStats()
+    return true
+  }
+
+  // Пересчёт статистики игроков по истории розыгрышей
+  function rebuildPlayerStats() {
+    const players = team.value.players
+    players.forEach(p => {
+      const subs = p.stats?.substitutions || { in: 0, out: 0 }
+      resetPlayerStats(p)
+      p.stats.substitutions = subs
+    })
+    const byId = new Map(players.map(p => [p.id, p]))
+    const apply = a => {
+      const p = byId.get(a.playerId)
+      if (p) updatePlayerStats(p, a.type, a.result)
+    }
+    events.value.forEach(e => { if (e.type === 'rally') e.actions.forEach(apply) })
+    currentRally.value.actions.forEach(apply)
+  }
+
+  // === ИСТОРИЯ МАТЧЕЙ ===
+  // Запись для списка «История матчей»: снимок матча без тяжёлых снимков отката
+  function createMatchRecord(name, id) {
+    const sets = { home: 0, away: 0 }
+    events.value.forEach(e => { if (e.type === 'set_finished') sets[e.winner]++ })
+    return {
+      id: id || `match-${Date.now()}`,
+      name: name || `${team.value.name} — ${team.value.opponentName || 'Соперник'}`,
+      savedAt: Date.now(),
+      teamData: {
+        name: team.value.name,
+        opponentName: team.value.opponentName || 'Соперник',
+        players: team.value.players.map(p => p.id)
+      },
+      sets,
+      currentRally: {
+        setNumber: currentRally.value.setNumber,
+        score: { ...currentRally.value.score }
+      },
+      snapshot: serializeMatch(0)
+    }
+  }
+
+  function restoreMatchSnapshot(record) {
+    const ok = restoreMatch(record?.snapshot || record)
+    if (!ok) throw new Error('Неверный формат сохранения матча')
+    saveMatch()
     return true
   }
 
@@ -1126,6 +1219,8 @@ function undoLastRally() {
     liberoIn,
     liberoOut,
     callTimeout,
+    timeoutsUsed,
+    TIMEOUTS_PER_SET,
     rotateTeam,
     keepMB,
     changeSet,
@@ -1150,6 +1245,8 @@ function undoLastRally() {
     loadSavedMatch,
     clearSavedMatch,
     exportMatch,
-    importMatch
+    importMatch,
+    createMatchRecord,
+    restoreMatchSnapshot
   }
 })

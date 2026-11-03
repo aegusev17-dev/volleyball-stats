@@ -222,8 +222,19 @@
       </div>
 
       <div class="timeout-section">
-        <button @click="store.callTimeout()" class="timeout-btn">
-          ⏸ Тайм-аут ({{ store.team.timeouts }}/2)
+        <button
+          @click="store.callTimeout('home')"
+          class="timeout-btn"
+          :disabled="store.timeoutsUsed('home') >= store.TIMEOUTS_PER_SET"
+        >
+          ⏸ Тайм-аут ({{ store.timeoutsUsed('home') }}/{{ store.TIMEOUTS_PER_SET }})
+        </button>
+        <button
+          @click="store.callTimeout('away')"
+          class="timeout-btn"
+          :disabled="store.timeoutsUsed('away') >= store.TIMEOUTS_PER_SET"
+        >
+          ⏸ {{ store.team.opponentName || 'Соперник' }} ({{ store.timeoutsUsed('away') }}/{{ store.TIMEOUTS_PER_SET }})
         </button>
       </div>
     </div>
@@ -975,6 +986,15 @@ h5 {
 
 .timeout-section {
   margin-top: 15px;
+}
+
+.timeout-btn + .timeout-btn {
+  margin-top: 8px;
+}
+
+.timeout-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .timeout-btn {
