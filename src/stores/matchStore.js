@@ -199,6 +199,10 @@ function undoLastRally() {
     team.value.isServing = true
     team.value.rotationStep = 0
     team.value.isMatchActive = false
+    // Сет не идёт — иначе вкладки «Матч» и «Запись» остаются в «полуначатом» состоянии:
+    // кнопки есть, а запись не работает и нет кнопки старта
+    currentRally.value.isActive = false
+    team.value.liberoReplacedId = null
     team.value.isLiberoOnCourt = false
   }
 
@@ -1059,6 +1063,8 @@ function undoLastRally() {
     }
     events.value = data.events || []
     if (data.currentRally) currentRally.value = data.currentRally
+    // Старые сохранения могли застрять в «полуначатом» состоянии
+    if (!team.value.isMatchActive) currentRally.value.isActive = false
     eventOrder = data.eventOrder || 0
     rallyCounter = data.rallyCounter || 0
     return true
@@ -1147,4 +1153,3 @@ function undoLastRally() {
     importMatch
   }
 })
-
