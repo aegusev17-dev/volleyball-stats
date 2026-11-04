@@ -682,27 +682,46 @@ function undoLastRally() {
     }
   }
 
-  // === ЭЙС СОПЕРНИКА (подача соперника — очко им, без участия наших игроков) ===
-  function addOpponentAce() {
-    if (!team.value.isMatchActive) return
-    if (team.value.isServing) return // эйс соперника возможен только когда мы принимаем
-    if (currentRally.value.actions.length > 0) return // это первое действие розыгрыша
-    if (!pendingRallySnapshot) {
-    pendingRallySnapshot = captureRallySnapshot()
+  // === ДЕЙСТВИЯ СОПЕРНИКА (без участия наших игроков, в статистику игроков не идут) ===
+  function pushOpponentAction(type, result, meta) {
+    if (currentRally.value.actions.length === 0 && !pendingRallySnapshot) {
+      pendingRallySnapshot = captureRallySnapshot()
     }
-    team.value.opponentAces = (team.value.opponentAces || 0) + 1
-
     const action = {
-      type: 'opponent_serve',
+      type,
       playerId: null,
       targetId: null,
-      result: 'opponent_ace',
+      result,
       timestamp: Date.now(),
       setNumber: currentRally.value.setNumber,
-      meta: { originalResult: 'Эйс' }
+      meta
     }
     currentRally.value.actions.push(action)
     endRally(action)
+  }
+
+  // Эйс соперника: мы принимаем, это первое действие розыгрыша — очко им
+  function addOpponentAce() {
+    if (!team.value.isMatchActive) return
+    if (team.value.isServing) return
+    if (currentRally.value.actions.length > 0) return
+    team.value.opponentAces = (team.value.opponentAces || 0) + 1
+    pushOpponentAction('opponent_serve', 'opponent_ace', { originalResult: 'Эйс' })
+  }
+
+  // Ошибка подачи соперника: мы принимаем, мяч не дошёл — очко нам
+  function addOpponentServeError() {
+    if (!team.value.isMatchActive) return
+    if (team.value.isServing) return
+    if (currentRally.value.actions.length > 0) return
+    pushOpponentAction('opponent_serve', 'opponent_error', { originalResult: 'Ошибка' })
+  }
+
+  // Ошибка соперника по ходу розыгрыша (приём, защита, касание сетки, аут) — очко нам
+  function addOpponentError() {
+    if (!team.value.isMatchActive) return
+    if (currentRally.value.actions.length === 0) return
+    pushOpponentAction('opponent_play', 'opponent_error', { originalResult: 'Ошибка' })
   }
 
   function updatePlayerStats(player, actionType, result) {
@@ -1241,6 +1260,8 @@ function undoLastRally() {
     toggleServing,
     setOpponentName,
     addOpponentAce,
+    addOpponentServeError,
+    addOpponentError,
     saveMatch,
     loadSavedMatch,
     clearSavedMatch,

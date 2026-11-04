@@ -63,6 +63,16 @@
           <button v-if="canOpponentAce" @click="opponentAce" class="ace-action-btn theirs">
             🎯 Эйс соперника
           </button>
+
+          <!-- Соперник подал в сетку/аут — очко нам -->
+          <button v-if="canOpponentAce" @click="opponentServeError" class="ace-action-btn ours">
+            ❌ Ошибка подачи соперника
+          </button>
+
+          <!-- Соперник ошибся по ходу розыгрыша (защита, приём, касание сетки, аут) — очко нам -->
+          <button v-if="canOpponentError" @click="opponentError" class="ace-action-btn ours">
+            ❌ Ошибка соперника
+          </button>
         </div>
         <div v-if="availableActions.length === 0" class="waiting-message">
           <template v-if="store.events.some(e => e.type === 'match_finished')">
@@ -200,7 +210,9 @@
           </div>
         </div>
 
-        <div v-else-if="!isBlockAction" class="btn-group">
+        <div v-if="touchHint && !isBlockAction" class="touch-hint">{{ touchHint }}</div>
+
+        <div v-if="!isBlockAction" class="btn-group">
           <button
             v-for="player in availablePlayers"
             :key="player.id"
@@ -397,13 +409,72 @@ const canOpponentAce = computed(() => {
   )
 })
 
-function opponentAce() {
-  store.addOpponentAce()
+function resetSelection() {
   selectedAction.value = null
   selectedPlayer.value = null
   selectedBlockPlayers.value = []
   selectedBlockType.value = null
 }
+
+function opponentAce() {
+  store.addOpponentAce()
+  resetSelection()
+}
+
+function opponentServeError() {
+  store.addOpponentServeError()
+  resetSelection()
+}
+
+// Ошибка соперника в ходе розыгрыша: доступна, пока мяч на стороне соперника
+// (после нашей подачи, после нашей атаки с защитой соперника, после перевода мяча)
+const canOpponentError = computed(() => {
+  return (
+    store.currentRally.isActive &&
+    store.currentRally.actions.length > 0 &&
+    availableActions.value.includes('block')
+  )
+})
+
+function opponentError() {
+  store.addOpponentError()
+  resetSelection()
+}
+
+// === КАСАНИЯ НАШЕЙ КОМАНДЫ В ТЕКУЩЕМ ВЛАДЕНИИ МЯЧОМ ===
+// Владение начинается после последнего «ухода мяча» к сопернику: подача, блок,
+// атака с защитой/блоком соперника, перевод мяча. Блок не считается касанием.
+const currentTouches = computed(() => {
+  const actions = store.currentRally.actions
+  let start = 0
+  for (let i = actions.length - 1; i >= 0; i--) {
+    const a = actions[i]
+    const ballLeftOurSide =
+      a.type === 'serve' ||
+      a.type === 'block' ||
+      (a.type === 'attack' && ['defense', 'block'].includes(a.result)) ||
+      (a.type === 'reception' && a.result === 'continue')
+    if (ballLeftOurSide) {
+      start = i + 1
+      break
+    }
+  }
+  return actions.slice(start).filter(a => ['reception', 'dig', 'set', 'attack'].includes(a.type))
+})
+
+// Тот, кто играл мячом последним, не может сыграть им снова подряд
+const lastTouchPlayerId = computed(() => currentTouches.value.at(-1)?.playerId ?? null)
+
+const touchHint = computed(() => {
+  if (!['set', 'attack'].includes(selectedAction.value)) return ''
+  const n = currentTouches.value.length + 1
+  const prev = lastTouchPlayerId.value
+    ? store.team.players.find(p => p.id === lastTouchPlayerId.value)
+    : null
+  return prev
+    ? `${n}-е касание. ${prev.name} только что играл мячом — его в списке нет`
+    : `${n}-е касание`
+})
 
 // === ФУНКЦИИ ДЛЯ СОБЫТИЙ ===
 function getEventIcon(event) {
@@ -624,64 +695,43 @@ const availablePlayers = computed(() => {
 
   const action = selectedAction.value
   const players = allPlayers.value
-
-  const actions = store.currentRally.actions
-  const firstTouchAction = actions.find(a => a.type === 'reception' || a.type === 'dig')
-  const firstTouchPlayerId = firstTouchAction?.playerId
-  const secondTouchAction = actions.find(a => a.type === 'set')
-  const secondTouchPlayerId = secondTouchAction?.playerId
-
-  let filteredPlayers = [...players]
+  const byPriority = priority => list =>
+    [...list].sort((x, y) => {
+      const xi = priority.indexOf(x.position)
+      const yi = priority.indexOf(y.position)
+      return (xi === -1 ? 999 : xi) - (yi === -1 ? 999 : yi)
+    })
 
   switch (action) {
     case 'serve':
       return players.filter(p => isInZone1(p))
 
     case 'attack': {
-      const excludeIds = secondTouchPlayerId ? [secondTouchPlayerId] : []
-      filteredPlayers = players.filter(p => !excludeIds.includes(p.id))
-      return [...filteredPlayers].sort((a, b) => {
-        const aZone = getPlayerZone(a)
-        const bZone = getPlayerZone(b)
-        const aFront = aZone && [2, 3, 4].includes(aZone)
-        const bFront = bZone && [2, 3, 4].includes(bZone)
-        if (aFront && !bFront) return -1
-        if (!aFront && bFront) return 1
+      // Атаковать может любой, кроме того, кто играл мячом перед этим
+      // (в том числе связующий — вторым или третьим касанием)
+      const list = players.filter(p => p.id !== lastTouchPlayerId.value)
+      return [...list].sort((x, y) => {
+        const xFront = isInFrontRow(x)
+        const yFront = isInFrontRow(y)
+        if (xFront && !yFront) return -1
+        if (!xFront && yFront) return 1
         const priority = ['OPP', 'OH', 'MB', 'S', 'L']
-        const aIdx = priority.indexOf(a.position)
-        const bIdx = priority.indexOf(b.position)
-        return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx)
+        const xi = priority.indexOf(x.position)
+        const yi = priority.indexOf(y.position)
+        return (xi === -1 ? 999 : xi) - (yi === -1 ? 999 : yi)
       })
     }
 
-    case 'reception': {
-      const priority = ['L', 'OH', 'OPP', 'MB', 'S']
-      return [...players].sort((a, b) => {
-        const aIdx = priority.indexOf(a.position)
-        const bIdx = priority.indexOf(b.position)
-        return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx)
-      })
-    }
+    case 'reception':
+      return byPriority(['L', 'OH', 'OPP', 'MB', 'S'])(players)
 
-    case 'set': {
-      const priority = ['S', 'L', 'OH', 'MB', 'OPP']
-      const excludeIds = firstTouchPlayerId ? [firstTouchPlayerId] : []
-      filteredPlayers = players.filter(p => !excludeIds.includes(p.id))
-      return [...filteredPlayers].sort((a, b) => {
-        const aIdx = priority.indexOf(a.position)
-        const bIdx = priority.indexOf(b.position)
-        return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx)
-      })
-    }
+    case 'set':
+      return byPriority(['S', 'L', 'OH', 'MB', 'OPP'])(
+        players.filter(p => p.id !== lastTouchPlayerId.value)
+      )
 
-    case 'dig': {
-      const priority = ['L', 'OH', 'OPP', 'MB', 'S']
-      return [...players].sort((a, b) => {
-        const aIdx = priority.indexOf(a.position)
-        const bIdx = priority.indexOf(b.position)
-        return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx)
-      })
-    }
+    case 'dig':
+      return byPriority(['L', 'OH', 'OPP', 'MB', 'S'])(players)
 
     default:
       return players
@@ -692,7 +742,7 @@ const availablePlayers = computed(() => {
 function getResultsForAction(action) {
   const map = {
     serve: ['Эйс', 'Ошибка', 'В игре'],
-    reception: ['Идеальный', 'Хороший', 'Плохой', 'Ошибка соперника', 'Переход (очко)', 'Переход (в игре)', 'Ошибка'],
+    reception: ['Идеальный', 'Хороший', 'Плохой', 'Переход (очко)', 'Переход (в игре)', 'Ошибка'],
     set: ['Ассист', 'Обычный', 'Ошибка'],
     attack: ['Очко', 'Ошибка', 'Защита (соперник)', 'Блок (соперник)'],
     block: ['Очко', 'Ошибка', 'Нет'],
@@ -836,7 +886,11 @@ function clearHistory() {
 
 function formatAction(action) {
   if (action.type === 'opponent_serve') {
-    return `${store.team.opponentName || 'Соперник'} — Подача (Эйс)`
+    const what = action.result === 'opponent_error' ? 'Ошибка' : 'Эйс'
+    return `${store.team.opponentName || 'Соперник'} — Подача (${what})`
+  }
+  if (action.type === 'opponent_play') {
+    return `${store.team.opponentName || 'Соперник'} — Ошибка`
   }
 
   const player = store.team.players.find(p => p.id === action.playerId)
@@ -1482,6 +1536,15 @@ h4 {
   .block-player-btn {
     width: 100%;
   }
+}
+
+.touch-hint {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #3f51b5;
+  font-size: 13px;
 }
 
 .timeout-bar {

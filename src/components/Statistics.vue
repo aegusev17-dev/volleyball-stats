@@ -698,6 +698,65 @@ function exportTableToPDF() {
   color: #667eea;
 }
 
+/* === ЗАКРЕПЛЁННЫЕ СТОЛБЦЫ: «#» и «Игрок» остаются на месте при прокрутке вбок === */
+.stats-table thead tr:first-child th:nth-child(1),
+.stats-table tbody td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  width: 36px;
+  min-width: 36px;
+  max-width: 36px;
+  box-sizing: border-box;
+}
+
+.stats-table thead tr:first-child th:nth-child(2),
+.stats-table tbody td:nth-child(2) {
+  position: sticky;
+  left: 36px;
+  min-width: 150px;
+  box-sizing: border-box;
+  box-shadow: 3px 0 4px -2px rgba(0, 0, 0, 0.25);
+}
+
+/* Граница между закреплёнными столбцами рисуется тенью внутри ячейки:
+   у обычной общей границы есть щель, в которой просвечивает прокручиваемое содержимое */
+.stats-table thead tr:first-child th:nth-child(1),
+.stats-table tbody td:nth-child(1) {
+  border-right: none !important;
+  box-shadow: inset -1px 0 0 #d0d0d0;
+}
+
+.stats-table thead tr:first-child th:nth-child(2),
+.stats-table tbody td:nth-child(2) {
+  border-left: none !important;
+}
+
+/* «Суммарно» занимает два первых столбца сразу */
+.stats-table .total-row td:first-child {
+  position: sticky;
+  left: 0;
+  box-shadow: 3px 0 4px -2px rgba(0, 0, 0, 0.25);
+}
+
+/* Закреплённые ячейки непрозрачные и лежат поверх прокручиваемых */
+.stats-table tbody td:nth-child(-n + 2) {
+  background: #ffffff;
+  z-index: 2;
+}
+
+.stats-table thead tr:first-child th:nth-child(-n + 2) {
+  z-index: 4;
+}
+
+.stats-table .total-row td:first-child {
+  background: #f5f5f5;
+  z-index: 2;
+}
+
+.stats-table tbody tr:hover td:nth-child(-n + 2) {
+  background: #f8f9ff;
+}
+
 /* === АДАПТИВ === */
 @media (max-width: 768px) {
   .stats-table {
