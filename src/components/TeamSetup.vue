@@ -248,6 +248,7 @@ function removePlayer(id) {
 
 .opponent-name-input {
   flex: 1;
+  min-width: 0;
   font-size: 18px;
   border: none;
   border-bottom: 2px solid #e53935;

@@ -856,7 +856,7 @@ h5 {
 }
 
 .court-preview-mini {
-  background: #1a1a2e;
+  background: #dfdfe7;
   border-radius: 12px;
   padding: 15px;
   margin: 10px 0;

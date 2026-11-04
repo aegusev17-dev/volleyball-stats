@@ -1,7 +1,7 @@
 <template>
   <div class="court-container">
     <div v-if="!hasPlayers" class="empty-state">
-      <p>⚠️ Добавьте игроков и настройте состав в разделе "Состав"</p>
+      <p>⚠️ Добавьте игроков и настройте состав на вкладке «Игроки и состав»</p>
     </div>
     <div v-else class="court-wrapper" :key="updateKey">
       <h4 class="team-title">
@@ -144,6 +144,7 @@ watch(() => store.currentRally.score, () => {
 
 <style scoped>
 .court-container {
+  min-width: 0;
   max-width: 600px;
   margin: 0 auto;
   padding: 20px;
@@ -159,6 +160,7 @@ watch(() => store.currentRally.score, () => {
 }
 
 .court-wrapper {
+  min-width: 0;
   background: #1a1a2e;
   border-radius: 16px;
   padding: 20px;
@@ -224,7 +226,7 @@ watch(() => store.currentRally.score, () => {
 
 .zones {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-template-rows: 1fr 1fr;
   gap: 10px;
   flex: 1;

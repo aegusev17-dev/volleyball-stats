@@ -79,7 +79,7 @@
             🏆 Матч завершён.
           </template>
           <template v-else-if="!store.currentRally.isActive">
-            🏁 Сет завершён. Откройте вкладку «Матч» и нажмите «Начать {{ store.currentRally.setNumber }}-й сет».
+            🏁 Сет завершён. Нажмите «Начать {{ store.currentRally.setNumber }}-й сет» в блоке «Управление матчем».
           </template>
           <template v-else>⏳ Ожидание завершения предыдущего действия...</template>
         </div>
